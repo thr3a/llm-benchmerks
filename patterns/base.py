@@ -5,4 +5,4 @@ from dataclasses import dataclass
 class Pattern:
     name: str
     prompt: str
-    max_tokens: int = 1024
+    max_tokens: int = 4096
