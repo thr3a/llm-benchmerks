@@ -19,7 +19,7 @@ FIELDS = ["model", "pattern", "run", "prompt_tokens", "completion_tokens",
 
 def run_once(client: OpenAI, model: str, pattern: Pattern) -> dict:
     # プロンプトキャッシュを避けるため、毎回末尾に現在時刻を付ける
-    prompt = f"{pattern.prompt}\n\n{datetime.now():%Y-%m-%d %H:%M:%S}"
+    prompt = f"{datetime.now():%Y-%m-%d %H:%M:%S}\n\n{pattern.prompt}"
     start = time.perf_counter()
     res = client.chat.completions.create(
         model=model,
