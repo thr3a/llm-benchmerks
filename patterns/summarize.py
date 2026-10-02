@@ -2,7 +2,7 @@ from pathlib import Path
 
 from .base import Pattern
 
-LONG_TEXT = (Path(__file__).parent / "handoutai-vs-car.md").read_text(encoding="utf-8")
+LONG_TEXT = (Path(__file__).parent / "8700tokens.md").read_text(encoding="utf-8")
 
 PATTERN = Pattern(
     name="summarize",

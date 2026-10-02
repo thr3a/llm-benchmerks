@@ -1,0 +1,85 @@
+import asyncio
+import random
+import time
+from dataclasses import dataclass, field
+
+import httpx
+
+RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+@dataclass
+class RetryPolicy:
+    max_attempts: int = 5
+    base_delay: float = 0.5
+    max_delay: float = 30.0
+    jitter: float = 0.3
+
+
+@dataclass
+class Stats:
+    requests: int = 0
+    retries: int = 0
+    failures: int = 0
+    total_wait: float = 0.0
+    latencies: list[float] = field(default_factory=list)
+
+
+class AsyncRetryClient:
+    def __init__(self, concurrency: int = 10, timeout: float = 10.0, policy: RetryPolicy | None = None):
+        self._sem = asyncio.Semaphore(concurrency)
+        self._client = httpx.AsyncClient(timeout=timeout)
+        self._policy = policy or RetryPolicy()
+        self.stats = Stats()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        await self._client.aclose()
+
+    def _delay(self, attempt: int, retry_after: str | None) -> float:
+        if retry_after and retry_after.isdigit():
+            return min(float(retry_after), self._policy.max_delay)
+        delay = min(self._policy.base_delay * 2**attempt, self._policy.max_delay)
+        return delay * (1 + random.uniform(-self._policy.jitter, self._policy.jitter))
+
+    async def get(self, url: str) -> httpx.Response:
+        async with self._sem:
+            for attempt in range(self._policy.max_attempts):
+                start = time.monotonic()
+                self.stats.requests += 1
+                try:
+                    resp = await self._client.get(url)
+                    self.stats.latencies.append(time.monotonic() - start)
+                    if resp.status_code not in RETRY_STATUS:
+                        return resp
+                    retry_after = resp.headers.get("Retry-After")
+                except (httpx.TimeoutException, httpx.TransportError):
+                    retry_after = None
+
+                if attempt == self._policy.max_attempts - 1:
+                    break
+                wait = self._delay(attempt, retry_after)
+                self.stats.retries += 1
+                self.stats.total_wait += wait
+                await asyncio.sleep(wait)
+
+            self.stats.failures += 1
+            raise RuntimeError(f"giving up on {url}")
+
+    async def get_all(self, urls: list[str]) -> list[httpx.Response | Exception]:
+        return await asyncio.gather(*(self.get(u) for u in urls), return_exceptions=True)
+
+
+async def main():
+    urls = [f"https://httpbin.org/status/{code}" for code in (200, 200, 503, 429, 200)]
+    async with AsyncRetryClient(concurrency=3) as client:
+        results = await client.get_all(urls)
+    for url, r in zip(urls, results):
+        print(url, r if isinstance(r, Exception) else r.status_code)
+    print(client.stats)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
